@@ -8,6 +8,60 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ============================================================================
+// JAVASCRIPT INTEROP FOR MOBILE KEYBOARD
+// ============================================================================
+
+#[cfg(target_arch = "wasm32")]
+mod js_keyboard {
+    extern "C" {
+        pub fn js_show_mobile_keyboard();
+        pub fn js_hide_mobile_keyboard();
+        pub fn js_is_input_confirmed() -> i32;
+        pub fn js_get_input_length() -> i32;
+        pub fn js_get_input_value(ptr: *mut u8, max_len: i32) -> i32;
+        pub fn js_reset_input();
+    }
+    
+    pub fn show_keyboard() {
+        unsafe { js_show_mobile_keyboard(); }
+    }
+    
+    pub fn hide_keyboard() {
+        unsafe { js_hide_mobile_keyboard(); }
+    }
+    
+    pub fn is_confirmed() -> bool {
+        unsafe { js_is_input_confirmed() != 0 }
+    }
+    
+    pub fn get_input() -> String {
+        unsafe {
+            let len = js_get_input_length();
+            if len <= 0 {
+                return String::new();
+            }
+            let mut buffer = vec![0u8; len as usize];
+            let actual_len = js_get_input_value(buffer.as_mut_ptr(), len);
+            buffer.truncate(actual_len as usize);
+            String::from_utf8(buffer).unwrap_or_default()
+        }
+    }
+    
+    pub fn reset() {
+        unsafe { js_reset_input(); }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod js_keyboard {
+    pub fn show_keyboard() {}
+    pub fn hide_keyboard() {}
+    pub fn is_confirmed() -> bool { false }
+    pub fn get_input() -> String { String::new() }
+    pub fn reset() {}
+}
+
+// ============================================================================
 // CONFIGURATION
 // ============================================================================
 
@@ -1415,6 +1469,9 @@ impl Game {
                 if play_activated {
                     if self.player_name.is_empty() {
                         self.state = GameState::EnterName;
+                        // Trigger mobile keyboard on WASM
+                        #[cfg(target_arch = "wasm32")]
+                        js_keyboard::show_keyboard();
                     } else {
                         self.reset();
                         self.state = GameState::Playing;
@@ -1443,19 +1500,54 @@ impl Game {
                 }
             }
             GameState::EnterName => {
-                if let Some(c) = get_char_pressed() {
-                    if c.is_alphanumeric() && self.name_input.len() < 12 {
-                        self.name_input.push(c);
+                // On WASM, use the mobile keyboard overlay
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // Check if mobile input was confirmed
+                    if js_keyboard::is_confirmed() {
+                        let input = js_keyboard::get_input();
+                        js_keyboard::reset();
+                        js_keyboard::hide_keyboard();
+                        
+                        if input.is_empty() || input == "Anonymous" {
+                            self.player_name = "Anonymous".to_string();
+                        } else {
+                            self.player_name = input;
+                        }
+                        self.name_input.clear();
+                        self.reset();
+                        self.state = GameState::Playing;
                     }
                 }
-                if is_key_pressed(KeyCode::Backspace) {
-                    self.name_input.pop();
+                
+                // On desktop (non-WASM), use keyboard input
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if let Some(c) = get_char_pressed() {
+                        if c.is_alphanumeric() && self.name_input.len() < 12 {
+                            self.name_input.push(c);
+                        }
+                    }
+                    if is_key_pressed(KeyCode::Backspace) {
+                        self.name_input.pop();
+                    }
+                    if is_key_pressed(KeyCode::Enter) && !self.name_input.is_empty() {
+                        self.player_name = self.name_input.clone();
+                        self.name_input.clear();
+                        self.reset();
+                        self.state = GameState::Playing;
+                    }
                 }
-                if is_key_pressed(KeyCode::Enter) && !self.name_input.is_empty() {
-                    self.player_name = self.name_input.clone();
+                
+                // Escape goes back to menu on any platform
+                if is_key_pressed(KeyCode::Escape) {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        js_keyboard::hide_keyboard();
+                        js_keyboard::reset();
+                    }
                     self.name_input.clear();
-                    self.reset();
-                    self.state = GameState::Playing;
+                    self.state = GameState::MainMenu;
                 }
             }
             GameState::Playing => {
@@ -2045,41 +2137,61 @@ impl Game {
     }
 
     fn draw_name_input(&self) {
-        let cx = VIRTUAL_WIDTH / 2.0;
-        let cy = VIRTUAL_HEIGHT / 2.0;
-
-        // Title
-        let title_size = scaled_font(30.0);
-        let title = "Entre ton pseudo:";
-        let title_dim = measure_text(title, None, title_size as u16, 1.0);
-        draw_text(title, cx - title_dim.width / 2.0, cy - scaled(50.0), title_size, WHITE);
-        
-        // Input box
-        let box_width = scaled(280.0);
-        let box_height = scaled(55.0);
-        let box_x = cx - box_width / 2.0;
-        let box_y = cy - scaled(10.0);
-        draw_rectangle(box_x, box_y, box_width, box_height, Color::new(1.0, 1.0, 1.0, 0.9));
-        draw_rectangle_lines(box_x, box_y, box_width, box_height, 3.0, Color::new(0.2, 0.6, 0.2, 1.0));
-        
-        // Input text
-        let display_text = if self.name_input.is_empty() { "FartKing42" } else { &self.name_input };
-        let text_color = if self.name_input.is_empty() { GRAY } else { BLACK };
-        let text_size = scaled_font(28.0);
-        let text_dim = measure_text(display_text, None, text_size as u16, 1.0);
-        draw_text(display_text, cx - text_dim.width / 2.0, box_y + box_height * 0.65, text_size, text_color);
-        
-        // Blinking cursor
-        if self.name_input.len() < 12 && (get_time() * 2.0) as i32 % 2 == 0 {
-            let cursor_x = cx - text_dim.width / 2.0 + text_dim.width + scaled(4.0);
-            draw_line(cursor_x, box_y + scaled(10.0), cursor_x, box_y + box_height - scaled(10.0), 2.0, BLACK);
+        // On WASM, the HTML overlay handles input, so just show a waiting message
+        #[cfg(target_arch = "wasm32")]
+        {
+            let cx = VIRTUAL_WIDTH / 2.0;
+            let cy = VIRTUAL_HEIGHT / 2.0;
+            
+            // Semi-transparent background
+            draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.5));
+            
+            // Message
+            let msg = "Utilise le clavier...";
+            let msg_size = scaled_font(24.0);
+            let msg_dim = measure_text(msg, None, msg_size as u16, 1.0);
+            draw_text(msg, cx - msg_dim.width / 2.0, cy, msg_size, WHITE);
         }
+        
+        // On desktop, show the full input UI
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let cx = VIRTUAL_WIDTH / 2.0;
+            let cy = VIRTUAL_HEIGHT / 2.0;
 
-        // Hint
-        let hint = "ENTREE pour confirmer";
-        let hint_size = scaled_font(20.0);
-        let hint_dim = measure_text(hint, None, hint_size as u16, 1.0);
-        draw_text(hint, cx - hint_dim.width / 2.0, cy + scaled(80.0), hint_size, WHITE);
+            // Title
+            let title_size = scaled_font(30.0);
+            let title = "Entre ton pseudo:";
+            let title_dim = measure_text(title, None, title_size as u16, 1.0);
+            draw_text(title, cx - title_dim.width / 2.0, cy - scaled(50.0), title_size, WHITE);
+            
+            // Input box
+            let box_width = scaled(280.0);
+            let box_height = scaled(55.0);
+            let box_x = cx - box_width / 2.0;
+            let box_y = cy - scaled(10.0);
+            draw_rectangle(box_x, box_y, box_width, box_height, Color::new(1.0, 1.0, 1.0, 0.9));
+            draw_rectangle_lines(box_x, box_y, box_width, box_height, 3.0, Color::new(0.2, 0.6, 0.2, 1.0));
+            
+            // Input text
+            let display_text = if self.name_input.is_empty() { "FartKing42" } else { &self.name_input };
+            let text_color = if self.name_input.is_empty() { GRAY } else { BLACK };
+            let text_size = scaled_font(28.0);
+            let text_dim = measure_text(display_text, None, text_size as u16, 1.0);
+            draw_text(display_text, cx - text_dim.width / 2.0, box_y + box_height * 0.65, text_size, text_color);
+            
+            // Blinking cursor
+            if self.name_input.len() < 12 && (get_time() * 2.0) as i32 % 2 == 0 {
+                let cursor_x = cx - text_dim.width / 2.0 + text_dim.width + scaled(4.0);
+                draw_line(cursor_x, box_y + scaled(10.0), cursor_x, box_y + box_height - scaled(10.0), 2.0, BLACK);
+            }
+
+            // Hint
+            let hint = "ENTREE pour confirmer";
+            let hint_size = scaled_font(20.0);
+            let hint_dim = measure_text(hint, None, hint_size as u16, 1.0);
+            draw_text(hint, cx - hint_dim.width / 2.0, cy + scaled(80.0), hint_size, WHITE);
+        }
     }
 
     fn draw_gameplay(&self, offset: Vec2, player_scale: f32, sounds: &SoundRegistry) {

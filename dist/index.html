@@ -43,17 +43,194 @@
             color: rgba(255, 255, 255, 0.5);
             font-size: 12px;
             pointer-events: none;
+            z-index: 5;
+        }
+        
+        /* Mobile keyboard input overlay */
+        #mobileInputOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        
+        #mobileInputOverlay.active {
+            display: flex;
+        }
+        
+        #mobileInputOverlay h2 {
+            color: white;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        #mobileNameInput {
+            font-size: 28px;
+            padding: 15px 25px;
+            border: 3px solid #4CAF50;
+            border-radius: 10px;
+            text-align: center;
+            width: 280px;
+            max-width: 80%;
+            background: white;
+            color: black;
+            outline: none;
+        }
+        
+        #mobileInputOverlay .buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+        
+        #mobileInputOverlay button {
+            font-size: 20px;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        
+        #mobileInputOk {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        #mobileInputSkip {
+            background: #666;
+            color: white;
         }
     </style>
 </head>
 <body>
     <canvas id="glcanvas" tabindex="1"></canvas>
+    
+    <!-- Mobile keyboard input overlay -->
+    <div id="mobileInputOverlay">
+        <h2>Entre ton pseudo:</h2>
+        <input type="text" id="mobileNameInput" maxlength="12" placeholder="FartKing42" 
+               autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <div class="buttons">
+            <button id="mobileInputOk">OK ✓</button>
+            <button id="mobileInputSkip">Anonyme</button>
+        </div>
+    </div>
+    
     <div class="footer">FartCloud v0.1.0 - Made with 🦀 Rust + Macroquad</div>
 
     <!-- Macroquad JS Bundle (local copy to avoid COEP issues) -->
     <script src="./mq_js_bundle.js"></script>
     
     <script>
+        // Mobile keyboard input system for WASM games
+        var mobileInputCallback = null;
+        var mobileInputResult = null;
+        var inputConfirmed = false;
+        
+        const overlay = document.getElementById('mobileInputOverlay');
+        const input = document.getElementById('mobileNameInput');
+        const okBtn = document.getElementById('mobileInputOk');
+        const skipBtn = document.getElementById('mobileInputSkip');
+        
+        function confirmInput(value) {
+            mobileInputResult = value || '';
+            inputConfirmed = true;
+            overlay.classList.remove('active');
+            input.blur();
+            document.getElementById('glcanvas').focus();
+        }
+        
+        okBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            confirmInput(input.value);
+        });
+        
+        okBtn.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            confirmInput(input.value);
+        });
+        
+        skipBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            confirmInput('Anonymous');
+        });
+        
+        skipBtn.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            confirmInput('Anonymous');
+        });
+        
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmInput(input.value);
+            }
+        });
+        
+        // Register as miniquad plugin
+        miniquad_add_plugin({
+            register_plugin: function(importObject) {
+                // Show mobile keyboard overlay
+                importObject.env.js_show_mobile_keyboard = function() {
+                    mobileInputResult = null;
+                    inputConfirmed = false;
+                    input.value = '';
+                    overlay.classList.add('active');
+                    // Small delay to ensure overlay is visible before focus
+                    setTimeout(function() {
+                        input.focus();
+                        input.click();
+                    }, 100);
+                };
+                
+                // Hide mobile keyboard overlay
+                importObject.env.js_hide_mobile_keyboard = function() {
+                    overlay.classList.remove('active');
+                    input.blur();
+                    document.getElementById('glcanvas').focus();
+                };
+                
+                // Check if input was confirmed (OK or Skip pressed)
+                importObject.env.js_is_input_confirmed = function() {
+                    return inputConfirmed ? 1 : 0;
+                };
+                
+                // Get the input result length
+                importObject.env.js_get_input_length = function() {
+                    return mobileInputResult ? mobileInputResult.length : 0;
+                };
+                
+                // Copy input result to WASM memory
+                importObject.env.js_get_input_value = function(ptr, max_len) {
+                    if (!mobileInputResult) return 0;
+                    const encoder = new TextEncoder();
+                    const bytes = encoder.encode(mobileInputResult);
+                    const len = Math.min(bytes.length, max_len);
+                    const memory = new Uint8Array(wasm_memory.buffer);
+                    for (let i = 0; i < len; i++) {
+                        memory[ptr + i] = bytes[i];
+                    }
+                    return len;
+                };
+                
+                // Reset input state for next use
+                importObject.env.js_reset_input = function() {
+                    mobileInputResult = null;
+                    inputConfirmed = false;
+                };
+            },
+            name: "mobile_keyboard",
+            version: 1
+        });
+        
         // Load the WASM file
         load("./fartcloud.wasm");
     </script>
