@@ -157,9 +157,29 @@ fn game_offset_y() -> f32 {
     letterbox_params().2
 }
 
-/// Draw letterbox bars (black bars around game area) - not needed with render-to-texture
+/// Draw letterbox bars (black bars around game area) ON TOP of the game content
+/// This clips any content that renders outside the 16:9 game area
 fn draw_letterbox_bars() {
-    // The render-to-texture approach doesn't need this, but keeping for reference
+    let (_, offset_x, offset_y, game_w, game_h) = letterbox_params();
+    let sw = screen_width();
+    let sh = screen_height();
+    
+    // Top bar
+    if offset_y > 0.0 {
+        draw_rectangle(0.0, 0.0, sw, offset_y, BLACK);
+    }
+    // Bottom bar
+    if offset_y > 0.0 {
+        draw_rectangle(0.0, offset_y + game_h, sw, sh - (offset_y + game_h), BLACK);
+    }
+    // Left bar
+    if offset_x > 0.0 {
+        draw_rectangle(0.0, 0.0, offset_x, sh, BLACK);
+    }
+    // Right bar
+    if offset_x > 0.0 {
+        draw_rectangle(offset_x + game_w, 0.0, sw - (offset_x + game_w), sh, BLACK);
+    }
 }
 
 /// Convert screen coordinates to virtual game coordinates
@@ -378,24 +398,33 @@ struct SoundEntry {
     is_priority: bool,
 }
 
+/// Tracks an actively playing sound for ducking purposes
+struct ActiveSound {
+    sound: Sound,
+    current_volume: f32,
+    start_time: f64,
+}
+
+const DUCK_FACTOR: f32 = 0.8;      // Reduce volume by 20% per new sound
+const DUCK_MIN_VOLUME: f32 = 0.1;  // Floor: never go below 10%
+const SOUND_LIFETIME: f64 = 3.0;   // Cleanup sounds after 3 seconds
+
 struct SoundRegistry {
     sounds: HashMap<SoundAction, Vec<SoundEntry>>,  // Vec for random variants
+    active_sounds: Vec<ActiveSound>,  // Currently playing sounds for ducking
     master_volume: f32,
     sfx_volume: f32,
     is_muted: bool,
-    duck_timer: f32,
-    duck_amount: f32,
 }
 
 impl SoundRegistry {
     fn new(master_volume: f32, sfx_volume: f32) -> Self {
         Self {
             sounds: HashMap::new(),
+            active_sounds: Vec::new(),
             master_volume,
             sfx_volume,
             is_muted: false,
-            duck_timer: 0.0,
-            duck_amount: 0.5, // Reduce non-priority to 50% when ducking
         }
     }
     
@@ -467,31 +496,45 @@ impl SoundRegistry {
             let idx = rand::gen_range(0, entries.len());
             let entry = &entries[idx];
             
-            // Calculate final volume
-            let duck_mult = if self.duck_timer > 0.0 && !entry.is_priority {
-                self.duck_amount
-            } else {
-                1.0
-            };
+            // DUCKING: Reduce volume of ALL currently playing sounds by DUCK_FACTOR
+            for active in &mut self.active_sounds {
+                active.current_volume = (active.current_volume * DUCK_FACTOR).max(DUCK_MIN_VOLUME);
+                let applied_volume = active.current_volume * self.master_volume;
+                set_sound_volume(&active.sound, applied_volume);
+            }
             
-            let final_volume = entry.base_volume * self.sfx_volume * self.master_volume * duck_mult;
+            // Calculate volume for new sound (also ducked if other sounds are playing)
+            let base_volume = entry.base_volume * self.sfx_volume;
+            let ducked_volume = if self.active_sounds.is_empty() {
+                base_volume
+            } else {
+                (base_volume * DUCK_FACTOR).max(DUCK_MIN_VOLUME)
+            };
+            let final_volume = ducked_volume * self.master_volume;
+            
+            // Clone sound for tracking (Sound is Copy in macroquad)
+            let sound_copy = entry.sound.clone();
             
             play_sound(&entry.sound, PlaySoundParams {
                 looped: false,
                 volume: final_volume,
             });
             
-            // If priority sound, start ducking
-            if entry.is_priority {
-                self.duck_timer = 1.0; // Duck for 1 second
-            }
+            // Track this sound for future ducking
+            self.active_sounds.push(ActiveSound {
+                sound: sound_copy,
+                current_volume: ducked_volume,
+                start_time: macroquad::time::get_time(),
+            });
         }
     }
     
-    fn update(&mut self, dt: f32) {
-        if self.duck_timer > 0.0 {
-            self.duck_timer -= dt;
-        }
+    fn update(&mut self, _dt: f32) {
+        // Cleanup: Remove sounds older than SOUND_LIFETIME
+        let now = macroquad::time::get_time();
+        self.active_sounds.retain(|active| {
+            now - active.start_time < SOUND_LIFETIME
+        });
     }
     
     fn toggle_mute(&mut self) {
@@ -500,6 +543,15 @@ impl SoundRegistry {
     
     fn set_master_volume(&mut self, vol: f32) {
         self.master_volume = vol.clamp(0.0, 1.0);
+        // Update all active sounds with new master volume
+        for active in &self.active_sounds {
+            let applied_volume = active.current_volume * self.master_volume;
+            set_sound_volume(&active.sound, applied_volume);
+        }
+    }
+    
+    fn get_master_volume(&self) -> f32 {
+        self.master_volume
     }
 }
 
@@ -2453,7 +2505,10 @@ async fn main() {
         
         game.draw_game(&sprites, &sounds);
         
+        // Switch back to screen coords and draw letterbox bars on top to clip overflow
         set_default_camera();
+        draw_letterbox_bars();
+        
         next_frame().await;
     }
 }
