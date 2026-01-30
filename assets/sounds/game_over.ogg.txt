@@ -1,0 +1,22 @@
+PLACEHOLDER - Remplacer par game_over.ogg
+
+🎵 SON: Fin de partie / Game Over
+📏 DURÉE: 1.0-1.5 secondes
+🔊 VOLUME: 1.0 (100%)
+⚡ PRIORITÉ: ✅ OUI (duck autres sons à 50%)
+
+DESCRIPTION:
+Son de fin de partie, mix triste et comique.
+Peut être un "womp womp" de trombone triste,
+ou une descente de notes comique.
+Doit faire sourire malgré la défaite.
+
+MOTS-CLÉS RECHERCHE:
+- game over sound
+- sad trombone
+- fail sound effect
+- wah wah wah sound
+- losing horn
+
+CONVERSION:
+ffmpeg -i game_over.wav -c:a libvorbis -q:a 6 game_over.ogg

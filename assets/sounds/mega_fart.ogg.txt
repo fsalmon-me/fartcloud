@@ -1,0 +1,21 @@
+PLACEHOLDER - Remplacer par mega_fart.ogg
+
+🎵 SON: MEGA PET (combo ≥5)
+📏 DURÉE: 0.8-1.2 secondes
+🔊 VOLUME: 1.0 (100%)
+⚡ PRIORITÉ: ✅ OUI (duck autres sons à 50%)
+
+DESCRIPTION:
+Le GROS pet satisfaisant quand on fait un combo de 5+.
+Long, puissant, avec plusieurs "étapes" ou modulations.
+Doit donner une sensation d'accomplissement épique.
+Peut avoir un effet de reverb ou d'écho.
+
+MOTS-CLÉS RECHERCHE:
+- long fart sound
+- epic fart
+- trombone fart
+- massive whoopee cushion
+
+CONVERSION:
+ffmpeg -i mega_fart.wav -c:a libvorbis -q:a 6 mega_fart.ogg

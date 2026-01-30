@@ -1,0 +1,19 @@
+PLACEHOLDER - Remplacer par fart_2.ogg
+
+🎵 SON: Pet variant aigu
+📏 DURÉE: 0.3-0.5 secondes
+🔊 VOLUME: 0.8 (80%)
+⚡ PRIORITÉ: Non
+
+DESCRIPTION:
+Variante plus aiguë du pet standard.
+Plus "squeaky", comme un ballon qui se dégonfle rapidement.
+Pour varier les sons et éviter la répétition.
+
+MOTS-CLÉS RECHERCHE:
+- high pitched fart
+- squeaky fart
+- balloon deflate funny
+
+CONVERSION:
+ffmpeg -i fart_2.wav -c:a libvorbis -q:a 4 fart_2.ogg

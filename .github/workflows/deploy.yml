@@ -1,0 +1,62 @@
+name: Build and Deploy FartCloud
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: wasm32-unknown-unknown
+      
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      
+      - name: Build WASM (release)
+        run: cargo build --release --target wasm32-unknown-unknown
+      
+      - name: Prepare dist folder
+        run: |
+          mkdir -p dist
+          cp target/wasm32-unknown-unknown/release/fartcloud.wasm dist/
+          cp -r assets dist/ 2>/dev/null || true
+      
+      - name: Optimize WASM with wasm-opt (optional)
+        run: |
+          # Install wasm-opt if available
+          if command -v wasm-opt &> /dev/null; then
+            wasm-opt -Oz dist/fartcloud.wasm -o dist/fartcloud.wasm
+          else
+            echo "wasm-opt not found, skipping optimization"
+          fi
+        continue-on-error: true
+      
+      # Deploy with FIREBASE_TOKEN (from firebase login:ci)
+      - name: Deploy to Firebase Hosting
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          npm install -g firebase-tools
+          firebase deploy --only hosting:fartcloud --project myitproject-site
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

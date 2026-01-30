@@ -1,0 +1,21 @@
+PLACEHOLDER - Remplacer par boom.ogg
+
+🎵 SON: Explosion dans l'espace (mort BOOM)
+📏 DURÉE: 0.5-1.0 secondes
+🔊 VOLUME: 1.0 (100%)
+⚡ PRIORITÉ: ✅ OUI (duck autres sons à 50%)
+
+DESCRIPTION:
+Le nuage gonfle et explose dans l'espace.
+Son de "pop" ou explosion cartoon.
+Pas un son réaliste, plutôt fun/comique.
+Peut avoir un petit sifflement avant le pop.
+
+MOTS-CLÉS RECHERCHE:
+- balloon pop
+- cartoon explosion
+- poof sound effect
+- bubble burst
+
+CONVERSION:
+ffmpeg -i boom.wav -c:a libvorbis -q:a 5 boom.ogg

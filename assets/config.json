@@ -1,0 +1,26 @@
+{
+  "gravity_base": 600.0,
+  "fart_power_base": 380.0,
+  "player_size": 28.0,
+  "cloud_speed_initial": 180.0,
+  "cloud_speed_increment": 6.0,
+  "spawn_interval_initial": 2.0,
+  "spawn_interval_min": 0.8,
+  "difficulty_increase_every": 10,
+  "particle_count": 15,
+  "particle_lifetime": 0.7,
+  "shake_intensity": 12.0,
+  "shake_decay": 0.88,
+  "world_height": 2700.0,
+  "camera_lerp": 0.08,
+  "master_volume": 1.0,
+  "sfx_volume": 0.8,
+  
+  "_comment_difficulty": "Difficulty system parameters",
+  "speed_transition_level": 10,
+  "speed_slow_growth": 0.01,
+  "cloud_density_factor": 0.008,
+  "cloud_level_increment": 3,
+  "spawn_interval_decay": 0.08,
+  "hardcore_factor": 1.0
+}

@@ -1,0 +1,26 @@
+PLACEHOLDER - Remplacer par alert_beep.ogg
+
+🎵 SON: Bip d'alerte danger
+📏 DURÉE: 0.1-0.15 secondes
+🔊 VOLUME: 0.4 (40%)
+⚡ PRIORITÉ: Non
+
+DESCRIPTION:
+Bip court pour les alertes de zone danger.
+Joué en boucle de plus en plus vite.
+Doit être perceptible sans être agaçant.
+Style alarme/radar.
+
+MOTS-CLÉS RECHERCHE:
+- alert beep
+- radar ping
+- warning beep short
+- notification sound
+
+NOTES:
+Ce son sera joué fréquemment, donc choisir 
+quelque chose de pas trop intrusif.
+Volume bas par défaut (40%).
+
+CONVERSION:
+ffmpeg -i alert_beep.wav -c:a libvorbis -q:a 3 alert_beep.ogg

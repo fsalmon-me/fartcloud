@@ -1,0 +1,21 @@
+PLACEHOLDER - Remplacer par combo_up.ogg
+
+🎵 SON: Montée de niveau combo
+📏 DURÉE: 0.2-0.3 secondes
+🔊 VOLUME: 0.6 (60%)
+⚡ PRIORITÉ: Non
+
+DESCRIPTION:
+Son court et satisfaisant quand le combo augmente.
+"Ding!" aigu et joyeux.
+Donne un feedback positif immédiat.
+Comme un son de collectible ou achievement.
+
+MOTS-CLÉS RECHERCHE:
+- level up sound
+- coin collect sound
+- ding sound effect
+- positive chime
+
+CONVERSION:
+ffmpeg -i combo_up.wav -c:a libvorbis -q:a 4 combo_up.ogg

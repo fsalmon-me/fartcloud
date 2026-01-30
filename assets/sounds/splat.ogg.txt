@@ -1,0 +1,21 @@
+PLACEHOLDER - Remplacer par splat.ogg
+
+🎵 SON: Écrasement au sol (mort SPLAT)
+📏 DURÉE: 0.5-0.8 secondes
+🔊 VOLUME: 1.0 (100%)
+⚡ PRIORITÉ: ✅ OUI (duck autres sons à 50%)
+
+DESCRIPTION:
+Son d'écrasement humide/visqueux.
+Comme quelque chose de mou qui s'écrase.
+Un peu comique, pas trop gore.
+Le nuage s'aplatit = "SPLATCH!"
+
+MOTS-CLÉS RECHERCHE:
+- splat sound effect
+- squish sound
+- wet impact cartoon
+- slime splat
+
+CONVERSION:
+ffmpeg -i splat.wav -c:a libvorbis -q:a 5 splat.ogg
