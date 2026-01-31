@@ -231,6 +231,166 @@
             version: 1
         });
         
+        // ====================================================================
+        // FIREBASE FIRESTORE LEADERBOARD SYSTEM
+        // ====================================================================
+        
+        const FIREBASE_PROJECT = 'myitproject-site';
+        const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents`;
+        
+        // Leaderboard state
+        var leaderboardData = null;
+        var leaderboardReady = false;
+        var leaderboardFetching = false;
+        
+        // Local storage for high score
+        const HIGH_SCORE_KEY = 'fartcloud_high_score';
+        
+        // Submit a score to Firestore
+        async function submitScoreToFirestore(name, score) {
+            try {
+                const response = await fetch(`${FIRESTORE_BASE}/scores`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fields: {
+                            name: { stringValue: name },
+                            score: { integerValue: score.toString() },
+                            timestamp: { timestampValue: new Date().toISOString() }
+                        }
+                    })
+                });
+                if (!response.ok) {
+                    console.error('[Firestore] Submit failed:', response.status);
+                }
+            } catch (e) {
+                console.error('[Firestore] Submit error:', e);
+            }
+        }
+        
+        // Fetch top 10 scores from Firestore
+        async function fetchLeaderboardFromFirestore() {
+            leaderboardFetching = true;
+            leaderboardReady = false;
+            
+            try {
+                // Firestore REST API query for top 10 by score descending
+                const response = await fetch(`${FIRESTORE_BASE}:runQuery`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        structuredQuery: {
+                            from: [{ collectionId: 'scores' }],
+                            orderBy: [{ field: { fieldPath: 'score' }, direction: 'DESCENDING' }],
+                            limit: 10
+                        }
+                    })
+                });
+                
+                if (!response.ok) {
+                    console.error('[Firestore] Fetch failed:', response.status);
+                    leaderboardData = [];
+                } else {
+                    const data = await response.json();
+                    leaderboardData = [];
+                    
+                    // Parse Firestore response
+                    for (const item of data) {
+                        if (item.document && item.document.fields) {
+                            const fields = item.document.fields;
+                            leaderboardData.push({
+                                name: fields.name?.stringValue || 'Unknown',
+                                score: parseInt(fields.score?.integerValue || '0', 10)
+                            });
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('[Firestore] Fetch error:', e);
+                leaderboardData = [];
+            }
+            
+            leaderboardFetching = false;
+            leaderboardReady = true;
+        }
+        
+        // Register Firestore plugin
+        miniquad_add_plugin({
+            register_plugin: function(importObject) {
+                // Submit score to Firestore
+                importObject.env.js_submit_score = function(name_ptr, name_len, score) {
+                    const memory = new Uint8Array(wasm_memory.buffer);
+                    const nameBytes = memory.slice(name_ptr, name_ptr + name_len);
+                    const name = new TextDecoder().decode(nameBytes);
+                    submitScoreToFirestore(name, score);
+                };
+                
+                // Start fetching leaderboard
+                importObject.env.js_fetch_leaderboard = function() {
+                    if (!leaderboardFetching) {
+                        fetchLeaderboardFromFirestore();
+                    }
+                };
+                
+                // Check if leaderboard data is ready
+                importObject.env.js_is_leaderboard_ready = function() {
+                    return leaderboardReady ? 1 : 0;
+                };
+                
+                // Get leaderboard entry count
+                importObject.env.js_get_leaderboard_count = function() {
+                    return leaderboardData ? leaderboardData.length : 0;
+                };
+                
+                // Get leaderboard entry (name)
+                importObject.env.js_get_leaderboard_name = function(index, ptr, max_len) {
+                    if (!leaderboardData || index >= leaderboardData.length) return 0;
+                    const name = leaderboardData[index].name;
+                    const encoder = new TextEncoder();
+                    const bytes = encoder.encode(name);
+                    const len = Math.min(bytes.length, max_len);
+                    const memory = new Uint8Array(wasm_memory.buffer);
+                    for (let i = 0; i < len; i++) {
+                        memory[ptr + i] = bytes[i];
+                    }
+                    return len;
+                };
+                
+                // Get leaderboard entry (score)
+                importObject.env.js_get_leaderboard_score = function(index) {
+                    if (!leaderboardData || index >= leaderboardData.length) return 0;
+                    return leaderboardData[index].score;
+                };
+                
+                // Reset leaderboard ready state (for re-fetching)
+                importObject.env.js_reset_leaderboard = function() {
+                    leaderboardReady = false;
+                };
+                
+                // Save high score to localStorage
+                importObject.env.js_save_high_score = function(score) {
+                    try {
+                        localStorage.setItem(HIGH_SCORE_KEY, score.toString());
+                    } catch (e) {
+                        console.warn('[LocalStorage] Save failed:', e);
+                    }
+                };
+                
+                // Get high score from localStorage
+                importObject.env.js_get_high_score = function() {
+                    try {
+                        const stored = localStorage.getItem(HIGH_SCORE_KEY);
+                        return stored ? parseInt(stored, 10) : 0;
+                    } catch (e) {
+                        console.warn('[LocalStorage] Get failed:', e);
+                        return 0;
+                    }
+                };
+            },
+            name: "firestore_leaderboard",
+            version: 1
+        });
+        
         // Load the WASM file
         load("./fartcloud.wasm");
     </script>

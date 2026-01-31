@@ -62,6 +62,78 @@ mod js_keyboard {
 }
 
 // ============================================================================
+// JAVASCRIPT INTEROP FOR FIRESTORE LEADERBOARD
+// ============================================================================
+
+#[cfg(target_arch = "wasm32")]
+mod js_firestore {
+    extern "C" {
+        pub fn js_submit_score(name_ptr: *const u8, name_len: i32, score: u32);
+        pub fn js_fetch_leaderboard();
+        pub fn js_is_leaderboard_ready() -> i32;
+        pub fn js_get_leaderboard_count() -> i32;
+        pub fn js_get_leaderboard_name(index: i32, ptr: *mut u8, max_len: i32) -> i32;
+        pub fn js_get_leaderboard_score(index: i32) -> u32;
+        pub fn js_reset_leaderboard();
+        pub fn js_save_high_score(score: u32);
+        pub fn js_get_high_score() -> u32;
+    }
+    
+    pub fn submit_score(name: &str, score: u32) {
+        unsafe {
+            js_submit_score(name.as_ptr(), name.len() as i32, score);
+        }
+    }
+    
+    pub fn fetch_leaderboard() {
+        unsafe { js_fetch_leaderboard(); }
+    }
+    
+    pub fn is_leaderboard_ready() -> bool {
+        unsafe { js_is_leaderboard_ready() != 0 }
+    }
+    
+    pub fn get_leaderboard_count() -> usize {
+        unsafe { js_get_leaderboard_count() as usize }
+    }
+    
+    pub fn get_leaderboard_entry(index: usize) -> (String, u32) {
+        unsafe {
+            let mut name_buf = vec![0u8; 64];
+            let name_len = js_get_leaderboard_name(index as i32, name_buf.as_mut_ptr(), 64);
+            name_buf.truncate(name_len as usize);
+            let name = String::from_utf8(name_buf).unwrap_or_else(|_| "???".to_string());
+            let score = js_get_leaderboard_score(index as i32);
+            (name, score)
+        }
+    }
+    
+    pub fn reset_leaderboard() {
+        unsafe { js_reset_leaderboard(); }
+    }
+    
+    pub fn save_high_score(score: u32) {
+        unsafe { js_save_high_score(score); }
+    }
+    
+    pub fn get_high_score() -> u32 {
+        unsafe { js_get_high_score() }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod js_firestore {
+    pub fn submit_score(_name: &str, _score: u32) {}
+    pub fn fetch_leaderboard() {}
+    pub fn is_leaderboard_ready() -> bool { true }
+    pub fn get_leaderboard_count() -> usize { 0 }
+    pub fn get_leaderboard_entry(_index: usize) -> (String, u32) { (String::new(), 0) }
+    pub fn reset_leaderboard() {}
+    pub fn save_high_score(_score: u32) {}
+    pub fn get_high_score() -> u32 { 0 }
+}
+
+// ============================================================================
 // CONFIGURATION
 // ============================================================================
 
@@ -1059,33 +1131,106 @@ struct LeaderboardEntry {
     score: u32,
 }
 
-/// Get leaderboard - mock data for now
-/// TODO: Integrate with quad-net or wasm-bindgen for real Firebase
+/// Leaderboard state for async fetching
+static mut LEADERBOARD_CACHE: Option<Vec<LeaderboardEntry>> = None;
+static mut LEADERBOARD_FETCHING: bool = false;
+
+/// Start fetching leaderboard from Firestore (async)
+fn start_leaderboard_fetch() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        unsafe {
+            if !LEADERBOARD_FETCHING {
+                LEADERBOARD_FETCHING = true;
+                js_firestore::fetch_leaderboard();
+            }
+        }
+    }
+}
+
+/// Check if leaderboard is ready and get it
+fn poll_leaderboard() -> Option<Vec<LeaderboardEntry>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if js_firestore::is_leaderboard_ready() {
+            unsafe {
+                LEADERBOARD_FETCHING = false;
+            }
+            let count = js_firestore::get_leaderboard_count();
+            let mut entries = Vec::with_capacity(count);
+            for i in 0..count {
+                let (name, score) = js_firestore::get_leaderboard_entry(i);
+                entries.push(LeaderboardEntry { name, score });
+            }
+            js_firestore::reset_leaderboard();
+            return Some(entries);
+        }
+        None
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Desktop: return mock data
+        Some(vec![
+            LeaderboardEntry { name: "SpaceFarter".to_string(), score: 1500 },
+            LeaderboardEntry { name: "CloudKing".to_string(), score: 999 },
+            LeaderboardEntry { name: "PetMaster".to_string(), score: 500 },
+        ])
+    }
+}
+
+/// Get cached leaderboard or empty vec
 fn get_leaderboard() -> Vec<LeaderboardEntry> {
-    vec![
-        LeaderboardEntry { name: "SpaceFarter".to_string(), score: 1500 },
-        LeaderboardEntry { name: "CloudKing".to_string(), score: 999 },
-        LeaderboardEntry { name: "PetMaster".to_string(), score: 500 },
-    ]
+    unsafe {
+        LEADERBOARD_CACHE.clone().unwrap_or_default()
+    }
 }
 
-/// Submit score - logs for now
+/// Update leaderboard cache
+fn update_leaderboard_cache(entries: Vec<LeaderboardEntry>) {
+    unsafe {
+        LEADERBOARD_CACHE = Some(entries);
+    }
+}
+
+/// Submit score to Firestore
 fn submit_score(name: &str, score: u32) {
-    // TODO: Use wasm-bindgen for real Firebase submission
-    #[cfg(debug_assertions)]
-    eprintln!("[Leaderboard] Score submitted: {} - {}", name, score);
-    let _ = (name, score);
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_firestore::submit_score(name, score);
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        eprintln!("[Leaderboard] Score submitted: {} - {}", name, score);
+        let _ = (name, score);
+    }
 }
 
-/// Get persisted high score - returns 0 for now
-/// TODO: Use quad-storage crate for localStorage access
+/// Get persisted high score from localStorage
 fn get_stored_high_score() -> u32 {
-    0
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_firestore::get_high_score()
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        0
+    }
 }
 
-/// Save high score - no-op for now
+/// Save high score to localStorage
 fn save_high_score(score: u32) {
-    let _ = score;
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_firestore::save_high_score(score);
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = score;
+    }
 }
 
 // ============================================================================
@@ -1430,6 +1575,8 @@ impl Game {
                 // Splash screen - any input goes to main menu
                 if is_key_pressed(KeyCode::Space) || any_click {
                     self.selected_button = 0;
+                    // Start fetching leaderboard in background
+                    start_leaderboard_fetch();
                     self.state = GameState::MainMenu;
                 }
             }
@@ -1477,9 +1624,17 @@ impl Game {
                         self.state = GameState::Playing;
                     }
                 } else if leaderboard_activated {
+                    // Start fetching if not already
+                    start_leaderboard_fetch();
                     self.state = GameState::Leaderboard;
                 } else if custom_activated {
                     self.state = GameState::CustomGame;
+                }
+                
+                // Poll for leaderboard data in background
+                if let Some(entries) = poll_leaderboard() {
+                    update_leaderboard_cache(entries.clone());
+                    self.leaderboard = entries;
                 }
                 
                 // Escape goes back to splash
@@ -1488,6 +1643,12 @@ impl Game {
                 }
             }
             GameState::Leaderboard => {
+                // Poll for leaderboard data
+                if let Some(entries) = poll_leaderboard() {
+                    update_leaderboard_cache(entries.clone());
+                    self.leaderboard = entries;
+                }
+                
                 // Any input returns to main menu
                 if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Space) || any_click {
                     self.state = GameState::MainMenu;
@@ -1747,7 +1908,8 @@ impl Game {
                         save_high_score(total_score);
                     }
                     submit_score(&self.player_name, total_score);
-                    self.leaderboard = get_leaderboard();
+                    // Start async leaderboard fetch
+                    start_leaderboard_fetch();
                     self.pending_sounds.push(SoundAction::GameOver);
                     self.state = GameState::GameOver;
                 } else {
@@ -1755,6 +1917,12 @@ impl Game {
                 }
             }
             GameState::GameOver => {
+                // Poll for leaderboard data (async fetch)
+                if let Some(entries) = poll_leaderboard() {
+                    update_leaderboard_cache(entries.clone());
+                    self.leaderboard = entries;
+                }
+                
                 if is_key_pressed(KeyCode::Space) || any_click {
                     self.reset();
                     self.state = GameState::Playing;
