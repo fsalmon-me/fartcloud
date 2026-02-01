@@ -1135,6 +1135,11 @@ struct LeaderboardEntry {
 static mut LEADERBOARD_CACHE: Option<Vec<LeaderboardEntry>> = None;
 static mut LEADERBOARD_FETCHING: bool = false;
 
+/// Check if leaderboard is currently loading
+fn is_leaderboard_loading() -> bool {
+    unsafe { LEADERBOARD_FETCHING }
+}
+
 /// Start fetching leaderboard from Firestore (async)
 fn start_leaderboard_fetch() {
     #[cfg(target_arch = "wasm32")]
@@ -2691,12 +2696,72 @@ impl Game {
         let lb_title_dim = measure_text(lb_title, None, lb_title_size as u16, 1.0);
         draw_text(lb_title, cx - lb_title_dim.width / 2.0, cy + scaled(100.0), lb_title_size, GOLD);
         
+        // Show loading indicator if still fetching
+        if is_leaderboard_loading() || self.leaderboard.is_empty() {
+            let loading_text = "Chargement...";
+            let loading_size = scaled_font(18.0);
+            let loading_dim = measure_text(loading_text, None, loading_size as u16, 1.0);
+            // Animate dots
+            let dots = match ((get_time() * 3.0) as i32) % 4 {
+                0 => "Chargement",
+                1 => "Chargement.",
+                2 => "Chargement..",
+                _ => "Chargement...",
+            };
+            let dots_dim = measure_text(dots, None, loading_size as u16, 1.0);
+            draw_text(dots, cx - dots_dim.width / 2.0, cy + scaled(140.0), loading_size, GRAY);
+        } else {
+            // Find player's position in leaderboard
+            let player_score = self.score as u32;
+        let player_position = self.leaderboard.iter()
+            .position(|e| e.name == self.player_name && e.score == player_score);
+        
+        // Also find rank by score (in case player appears multiple times or name differs)
+        let player_rank = self.leaderboard.iter()
+            .enumerate()
+            .find(|(_, e)| e.score == player_score)
+            .map(|(i, _)| i);
+        
         let entry_size = scaled_font(18.0);
         for (i, entry) in self.leaderboard.iter().take(5).enumerate() {
             let entry_text = format!("{}. {} - {}", i + 1, entry.name, entry.score);
             let entry_dim = measure_text(&entry_text, None, entry_size as u16, 1.0);
-            draw_text(&entry_text, cx - entry_dim.width / 2.0, cy + scaled(130.0) + i as f32 * scaled(25.0), entry_size, WHITE);
+            
+            // Highlight player's entry
+            let is_player = player_position == Some(i) || 
+                (entry.name == self.player_name && entry.score == player_score);
+            let color = if is_player { GOLD } else { WHITE };
+            
+            // Draw highlight background for player
+            if is_player {
+                draw_rectangle(
+                    cx - entry_dim.width / 2.0 - scaled(5.0),
+                    cy + scaled(115.0) + i as f32 * scaled(25.0),
+                    entry_dim.width + scaled(10.0),
+                    scaled(22.0),
+                    Color::new(1.0, 0.84, 0.0, 0.2)
+                );
+            }
+            
+            draw_text(&entry_text, cx - entry_dim.width / 2.0, cy + scaled(130.0) + i as f32 * scaled(25.0), entry_size, color);
         }
+        
+        // Show player's position if not in top 5
+        let in_top_5 = player_position.map(|p| p < 5).unwrap_or(false) ||
+            self.leaderboard.iter().take(5).any(|e| e.name == self.player_name && e.score == player_score);
+        
+        if !in_top_5 {
+            // Find where player would rank
+            let rank = self.leaderboard.iter()
+                .position(|e| player_score > e.score)
+                .unwrap_or(self.leaderboard.len()) + 1;
+            
+            let pos_text = format!("Ta position: #{}", rank);
+            let pos_size = scaled_font(16.0);
+            let pos_dim = measure_text(&pos_text, None, pos_size as u16, 1.0);
+            draw_text(&pos_text, cx - pos_dim.width / 2.0, cy + scaled(260.0), pos_size, Color::new(0.7, 0.7, 0.7, 1.0));
+        }
+        } // end else (leaderboard loaded)
 
         // Instructions
         let hint = "ESPACE/CLIC = Rejouer | ECHAP = Menu";
