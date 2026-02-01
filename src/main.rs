@@ -2698,10 +2698,7 @@ impl Game {
         
         // Show loading indicator if still fetching
         if is_leaderboard_loading() || self.leaderboard.is_empty() {
-            let loading_text = "Chargement...";
             let loading_size = scaled_font(18.0);
-            let loading_dim = measure_text(loading_text, None, loading_size as u16, 1.0);
-            // Animate dots
             let dots = match ((get_time() * 3.0) as i32) % 4 {
                 0 => "Chargement",
                 1 => "Chargement.",
@@ -2713,55 +2710,71 @@ impl Game {
         } else {
             // Find player's position in leaderboard
             let player_score = self.score as u32;
-        let player_position = self.leaderboard.iter()
-            .position(|e| e.name == self.player_name && e.score == player_score);
-        
-        // Also find rank by score (in case player appears multiple times or name differs)
-        let player_rank = self.leaderboard.iter()
-            .enumerate()
-            .find(|(_, e)| e.score == player_score)
-            .map(|(i, _)| i);
-        
-        let entry_size = scaled_font(18.0);
-        for (i, entry) in self.leaderboard.iter().take(5).enumerate() {
-            let entry_text = format!("{}. {} - {}", i + 1, entry.name, entry.score);
-            let entry_dim = measure_text(&entry_text, None, entry_size as u16, 1.0);
+            let player_idx = self.leaderboard.iter()
+                .position(|e| e.name == self.player_name && e.score == player_score);
             
-            // Highlight player's entry
-            let is_player = player_position == Some(i) || 
-                (entry.name == self.player_name && entry.score == player_score);
-            let color = if is_player { GOLD } else { WHITE };
+            // If not found by exact match, find by score (first occurrence)
+            let player_rank = player_idx.unwrap_or_else(|| {
+                self.leaderboard.iter()
+                    .position(|e| e.score <= player_score)
+                    .unwrap_or(self.leaderboard.len())
+            });
             
-            // Draw highlight background for player
-            if is_player {
-                draw_rectangle(
-                    cx - entry_dim.width / 2.0 - scaled(5.0),
-                    cy + scaled(115.0) + i as f32 * scaled(25.0),
-                    entry_dim.width + scaled(10.0),
-                    scaled(22.0),
-                    Color::new(1.0, 0.84, 0.0, 0.2)
-                );
+            let in_top_5 = player_rank < 5;
+            let entry_size = scaled_font(16.0);
+            let mut y_offset = scaled(130.0);
+            
+            // Helper to draw an entry
+            let draw_entry = |rank: usize, entry: &LeaderboardEntry, y: f32, is_player: bool| {
+                let entry_text = format!("#{:<3} {:<12} {:>5}", rank + 1, 
+                    if entry.name.len() > 12 { &entry.name[..12] } else { &entry.name }, 
+                    entry.score);
+                let entry_dim = measure_text(&entry_text, None, entry_size as u16, 1.0);
+                
+                if is_player {
+                    // Gold background for player
+                    draw_rectangle(
+                        cx - entry_dim.width / 2.0 - scaled(8.0),
+                        y - scaled(14.0),
+                        entry_dim.width + scaled(16.0),
+                        scaled(20.0),
+                        Color::new(1.0, 0.84, 0.0, 0.3)
+                    );
+                }
+                
+                let color = if is_player { GOLD } else { WHITE };
+                draw_text(&entry_text, cx - entry_dim.width / 2.0, y, entry_size, color);
+            };
+            
+            // Draw TOP 5
+            for i in 0..5.min(self.leaderboard.len()) {
+                let is_player = i == player_rank;
+                draw_entry(i, &self.leaderboard[i], cy + y_offset, is_player);
+                y_offset += scaled(22.0);
             }
             
-            draw_text(&entry_text, cx - entry_dim.width / 2.0, cy + scaled(130.0) + i as f32 * scaled(25.0), entry_size, color);
+            // If player is NOT in top 5, show separator and player context
+            if !in_top_5 && player_rank < self.leaderboard.len() {
+                // Separator
+                y_offset += scaled(5.0);
+                let sep = "· · ·";
+                let sep_dim = measure_text(sep, None, entry_size as u16, 1.0);
+                draw_text(sep, cx - sep_dim.width / 2.0, cy + y_offset, entry_size, GRAY);
+                y_offset += scaled(20.0);
+                
+                // Show 2 above, player, 2 below
+                let start = if player_rank >= 2 { player_rank - 2 } else { 0 };
+                let end = (player_rank + 3).min(self.leaderboard.len());
+                
+                // Skip entries already shown in top 5
+                for i in start..end {
+                    if i < 5 { continue; } // Already shown in top 5
+                    let is_player = i == player_rank;
+                    draw_entry(i, &self.leaderboard[i], cy + y_offset, is_player);
+                    y_offset += scaled(22.0);
+                }
+            }
         }
-        
-        // Show player's position if not in top 5
-        let in_top_5 = player_position.map(|p| p < 5).unwrap_or(false) ||
-            self.leaderboard.iter().take(5).any(|e| e.name == self.player_name && e.score == player_score);
-        
-        if !in_top_5 {
-            // Find where player would rank
-            let rank = self.leaderboard.iter()
-                .position(|e| player_score > e.score)
-                .unwrap_or(self.leaderboard.len()) + 1;
-            
-            let pos_text = format!("Ta position: #{}", rank);
-            let pos_size = scaled_font(16.0);
-            let pos_dim = measure_text(&pos_text, None, pos_size as u16, 1.0);
-            draw_text(&pos_text, cx - pos_dim.width / 2.0, cy + scaled(260.0), pos_size, Color::new(0.7, 0.7, 0.7, 1.0));
-        }
-        } // end else (leaderboard loaded)
 
         // Instructions
         let hint = "ESPACE/CLIC = Rejouer | ECHAP = Menu";
