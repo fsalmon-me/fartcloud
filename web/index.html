@@ -274,20 +274,20 @@
     // WASM STRING HELPERS
     // ========================================================================
 
-    // Will be set when WASM module loads
-    let wasmMemory = null;
+    // wasm_memory is a global set by mq_js_bundle.js after WASM instantiation.
+    // No local variable needed — Macroquad manages the WASM memory reference.
 
     function readWasmString(ptr, len) {
-        if (!wasmMemory) return '';
-        const bytes = new Uint8Array(wasmMemory.buffer, ptr, len);
+        if (!wasm_memory) return '';
+        const bytes = new Uint8Array(wasm_memory.buffer, ptr, len);
         return new TextDecoder().decode(bytes);
     }
 
     function writeWasmString(str, ptr, maxLen) {
-        if (!wasmMemory) return 0;
+        if (!wasm_memory) return 0;
         const encoded = new TextEncoder().encode(str);
         const len = Math.min(encoded.length, maxLen);
-        const target = new Uint8Array(wasmMemory.buffer, ptr, len);
+        const target = new Uint8Array(wasm_memory.buffer, ptr, len);
         target.set(encoded.subarray(0, len));
         return len;
     }
@@ -317,14 +317,22 @@
     });
 
     // ========================================================================
-    // EXTERN "C" FUNCTIONS — exposed to WASM
+    // WASM LOADER (Macroquad)
     // ========================================================================
 
-    // These functions are imported by the WASM module and called from Rust.
-    // They bridge the gap between Rust/WASM and the browser + platform API.
+    // Macroquad's mq_js_bundle.js exposes a global `importObject` with an `env`
+    // property. We must inject our custom functions into `importObject.env`
+    // BEFORE calling `load()`, which compiles the WASM and wires up imports.
+    //
+    // load() only accepts one argument (the .wasm filename). Any functions not
+    // found in importObject.env get replaced with no-op stubs, which would
+    // break polling loops (e.g. js_is_platform_config_ready always returning 0).
 
-    const wasmImports = {
-        env: {
+    const script = document.createElement('script');
+    script.src = 'mq_js_bundle.js';
+    script.onload = () => {
+        // Inject all custom functions into Macroquad's global importObject.env
+        Object.assign(importObject.env, {
             // --- Mobile Keyboard ---
             js_show_mobile_keyboard: () => {
                 inputField.value = '';
@@ -348,11 +356,8 @@
             // --- Platform: Score submission ---
             js_submit_score: (namePtr, nameLen, score) => {
                 const name = readWasmString(namePtr, nameLen);
-                // extras will be submitted with more details via js_submit_score_full
                 submitScoreToPlatform(name, score, {});
             },
-
-            // --- Platform: Score submission with details ---
             js_submit_score_full: (namePtr, nameLen, score, diffLevel, comboMax, fartCount, durationMs, deathTypePtr, deathTypeLen, zonePtr, zoneLen) => {
                 const name = readWasmString(namePtr, nameLen);
                 const deathType = readWasmString(deathTypePtr, deathTypeLen);
@@ -385,16 +390,11 @@
                 if (!leaderboardData || !leaderboardData.entries || index >= leaderboardData.entries.length) return 0;
                 return leaderboardData.entries[index].score || 0;
             },
-            js_reset_leaderboard: () => {
-                // No-op — leaderboard data stays cached
-            },
+            js_reset_leaderboard: () => {},
 
             // --- Platform: High score (sessionStorage fallback) ---
-            js_save_high_score: (score) => {
-                saveSessionHighScore(score);
-            },
+            js_save_high_score: (score) => saveSessionHighScore(score),
             js_get_high_score: () => {
-                // If connected and leaderboard has player_best, use that
                 if (isAuthenticated && leaderboardData && leaderboardData.player_best != null) {
                     return leaderboardData.player_best;
                 }
@@ -435,26 +435,11 @@
             },
             js_is_login_complete: () => (loginResult !== null) ? 1 : 0,
             js_is_login_success: () => (loginResult && loginResult.success) ? 1 : 0,
-        }
-    };
+        });
 
-    // ========================================================================
-    // WASM LOADER (Macroquad)
-    // ========================================================================
-
-    // Macroquad provides its own WASM loader via gl.js
-    // We need to hook into it to inject our custom imports
-
-    // Load the macroquad JS runtime
-    const script = document.createElement('script');
-    script.src = 'mq_js_bundle.js';
-    script.onload = async () => {
-        // Macroquad's load() function accepts additional imports
-        // We pass our platform + keyboard imports
-        const wasm = await load('fartcloud.wasm', wasmImports);
-        if (wasm && wasm.memory) {
-            wasmMemory = wasm.memory;
-        }
+        // Start Macroquad — load() only accepts the WASM filename.
+        // It uses the global importObject internally.
+        load('fartcloud.wasm');
     };
     document.head.appendChild(script);
     </script>

@@ -66,8 +66,8 @@ The workflow file is at `.github/workflows/deploy.yml`.
 Caddy config lives in the ops repo: `HetznerManagement/docker/Caddyfile`.
 
 This app is served at:
-- **URL**: `https://fartcloud.ton-domaine.com`
-- **Caddy block type**: `file_server` (static WASM app)
+- **URL**: `http://46.225.85.7/fartcloud/`
+- **Caddy block type**: `handle_path` + `file_server` (static WASM app, path-based)
 
 To add or modify the routing, edit `HetznerManagement/docker/Caddyfile` then run:
 ```bash
@@ -84,9 +84,11 @@ make docker-restart   # from HetznerManagement/
      "sudo mkdir -p /var/www/fartcloud && sudo chown admin:admin /var/www/fartcloud"
    ```
 
-2. Add a Caddy block in `HetznerManagement/docker/Caddyfile`:
+2. Add a Caddy block inside the existing `:80` block in `HetznerManagement/docker/Caddyfile`:
    ```caddy
-   fartcloud.ton-domaine.com {
+   # Inside :80 { ... }
+   redir /fartcloud /fartcloud/ permanent
+   handle_path /fartcloud/* {
        root * /var/www/fartcloud
        encode gzip
        file_server
@@ -94,16 +96,13 @@ make docker-restart   # from HetznerManagement/
            Cross-Origin-Opener-Policy "same-origin"
            Cross-Origin-Embedder-Policy "require-corp"
        }
-       header @wasm path *.wasm {
-           Content-Type "application/wasm"
-           Cache-Control "public, max-age=31536000, immutable"
-       }
-       header @assets path *.js *.css *.woff2 *.ogg *.png {
-           Cache-Control "public, max-age=31536000, immutable"
-       }
-       header @html path *.html {
-           Cache-Control "no-cache"
-       }
+       @wasm path *.wasm
+       header @wasm Content-Type "application/wasm"
+       header @wasm Cache-Control "public, max-age=31536000, immutable"
+       @assets path *.js *.css *.ogg *.png
+       header @assets Cache-Control "public, max-age=31536000, immutable"
+       @html path *.html
+       header @html Cache-Control "no-cache"
        try_files {path} /index.html
    }
    ```
