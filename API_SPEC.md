@@ -38,10 +38,11 @@ et en **mode connecté** lorsqu'un `PLATFORM_API_URL` est défini et qu'un token
 └─────────────────┘         └──────────────────┘
 ```
 
-- Le jeu est un fichier WASM statique servi par Caddy (Hetzner).
+- Le jeu est un fichier WASM statique servi par Caddy sur `http://46.225.85.7/fartcloud/`.
 - Les appels API partent du **navigateur du joueur** vers la plateforme.
+- L'URL de la plateforme est passée via `?api=URL` dans l'URL du jeu, ou via le meta tag `platform-api-url`.
 - Le JS bridge dans `index.html` fait les appels `fetch()` et expose les résultats au WASM via `extern "C"`.
-- En mode anonyme, aucun appel API n'est effectué.
+- En mode anonyme (pas d'`api` ni de `token`), aucun appel API n'est effectué.
 
 ---
 
@@ -70,11 +71,15 @@ Content-Type: application/json
 
 ```
 1. Token URL:
-   Plateforme → redirect → https://fartcloud.domain.com/?token=ABC123
+   Plateforme → redirect → http://46.225.85.7/fartcloud/?token=ABC123&api=https://platform.example.com
    Jeu → GET /api/game/auth/validate (header: Bearer ABC123)
    Plateforme → { "valid": true, "username": "PlayerOne" }
 
-2. Login (placeholder):
+2. iframe:
+   <iframe src="http://46.225.85.7/fartcloud/?token=ABC123&api=https://platform.example.com"></iframe>
+   Même flux d'API qu'en redirect.
+
+3. Login (placeholder):
    Jeu → POST /api/game/auth/login { "username": "x", "password": "y" }
    Plateforme → { "token": "ABC123", "username": "PlayerOne" }
 
@@ -85,6 +90,9 @@ Content-Type: application/json
 ---
 
 ## Endpoints
+
+> **Paramètre `gameId`** : Les endpoints config, scores et leaderboard acceptent `?gameId=fartcloud`
+> pour identifier le jeu sur la plateforme multi-jeux.
 
 ### GET /api/game/auth/validate
 
@@ -156,7 +164,7 @@ Retourne les paramètres de jeu définis par la plateforme. Ces paramètres **su
 
 **Request:**
 ```http
-GET /api/game/config
+GET /api/game/config?gameId=fartcloud
 Authorization: Bearer <token>
 ```
 
@@ -232,7 +240,7 @@ Soumet le score d'une partie terminée. Nécessite un token valide.
 
 **Request:**
 ```http
-POST /api/game/scores
+POST /api/game/scores?gameId=fartcloud
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
@@ -287,7 +295,7 @@ Retourne le classement des meilleurs scores.
 
 **Request:**
 ```http
-GET /api/game/leaderboard
+GET /api/game/leaderboard?gameId=fartcloud
 Authorization: Bearer <token>
 ```
 
@@ -469,13 +477,16 @@ Codes d'erreur possibles :
 
 ## CORS
 
-La plateforme doit autoriser les requêtes cross-origin depuis le domaine du jeu :
+La plateforme doit autoriser les requêtes cross-origin depuis l'origine du jeu :
 
 ```
-Access-Control-Allow-Origin: https://fartcloud.ton-domaine.com
+Access-Control-Allow-Origin: http://46.225.85.7
 Access-Control-Allow-Headers: Authorization, Content-Type
 Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Credentials: true
 ```
+
+> En développement local, il faut aussi autoriser `http://localhost:*`.
 
 ---
 

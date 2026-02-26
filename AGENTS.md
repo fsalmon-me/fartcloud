@@ -92,10 +92,6 @@ make docker-restart   # from HetznerManagement/
        root * /var/www/fartcloud
        encode gzip
        file_server
-       header {
-           Cross-Origin-Opener-Policy "same-origin"
-           Cross-Origin-Embedder-Policy "require-corp"
-       }
        @wasm path *.wasm
        header @wasm Content-Type "application/wasm"
        header @wasm Cache-Control "public, max-age=31536000, immutable"
@@ -121,8 +117,15 @@ make docker-restart   # from HetznerManagement/
 FartCloud connects to an external platform via REST API for authentication,
 game config, leaderboard, and score submission. See `API_SPEC.md` for full docs.
 
-The platform URL is configured via `<meta name="platform-api-url">` in `web/index.html`.
-If empty or absent, the game runs in **anonymous mode** (fully playable, no API calls).
+The platform URL is configured via:
+1. **URL query parameter** `?api=URL` (preferred — set by CORE when embedding or redirecting)
+2. **Meta tag** `<meta name="platform-api-url">` in `web/index.html` (fallback)
+
+If neither is set, the game runs in **anonymous mode** (fully playable, no API calls).
+
+**Integration URLs:**
+- Redirect: `http://46.225.85.7/fartcloud/?token=JWT&api=https://platform-url.com`
+- iframe: `<iframe src="http://46.225.85.7/fartcloud/?token=JWT&api=https://platform-url.com">`
 
 ### Modes
 
@@ -137,9 +140,9 @@ If empty or absent, the game runs in **anonymous mode** (fully playable, no API 
 |----------|--------|-----------|
 | `/api/game/auth/validate` | GET | Validate auth token |
 | `/api/game/auth/login` | POST | Login (placeholder) |
-| `/api/game/config` | GET | Config override (partial) |
-| `/api/game/scores` | POST | Submit score |
-| `/api/game/leaderboard` | GET | Get leaderboard |
+| `/api/game/config?gameId=fartcloud` | GET | Config override (partial) |
+| `/api/game/scores?gameId=fartcloud` | POST | Submit score |
+| `/api/game/leaderboard?gameId=fartcloud` | GET | Get leaderboard |
 
 ---
 
@@ -156,7 +159,7 @@ If empty or absent, the game runs in **anonymous mode** (fully playable, no API 
 
 | Variable              | Where set                        | Notes                          |
 |-----------------------|----------------------------------|--------------------------------|
-| `PLATFORM_API_URL`    | `web/index.html` meta tag        | Platform API base URL (empty = anonymous mode) |
+| `PLATFORM_API_URL`    | URL `?api=` param or meta tag    | Platform API base URL (empty = anonymous mode) |
 | `HETZNER_SSH_KEY`     | GitHub Actions secret            | SSH private key for deploy     |
 | `HETZNER_SSH_HOST`    | GitHub Actions secret            | Server IP                      |
 | `HETZNER_SSH_USER`    | GitHub Actions secret            | SSH user                       |
