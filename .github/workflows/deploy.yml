@@ -42,6 +42,7 @@ jobs:
           cp target/wasm32-unknown-unknown/release/fartcloud.wasm dist/
           cp -r assets dist/ 2>/dev/null || true
           cp web/index.html dist/
+          cp web/mq_js_bundle.js dist/
       
       - name: Optimize WASM with wasm-opt (optional)
         run: |

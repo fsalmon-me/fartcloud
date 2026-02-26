@@ -1,7 +1,6 @@
 # Build outputs
 /target/
-/dist/*.wasm
-/dist/assets/
+/dist/
 
 # Cargo
 Cargo.lock
@@ -18,7 +17,3 @@ Thumbs.db
 
 # Logs
 *.log
-
-# Firebase
-.firebase/
-firebase-debug.log
