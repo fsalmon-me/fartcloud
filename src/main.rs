@@ -1,6 +1,7 @@
 //! FartCloud - Flappy Bird-style game with a farting cloud
-//! Rust/Macroquad WASM game with Firebase leaderboard
+//! Rust/Macroquad WASM game with Platform API leaderboard
 //! Features: Altitude zones, directional farts, variable gravity
+//! Modes: Anonymous (standalone) or Connected (platform API)
 
 use macroquad::prelude::*;
 use macroquad::audio::{load_sound, play_sound, set_sound_volume, Sound, PlaySoundParams};
@@ -62,13 +63,24 @@ mod js_keyboard {
 }
 
 // ============================================================================
-// JAVASCRIPT INTEROP FOR FIRESTORE LEADERBOARD
+// JAVASCRIPT INTEROP FOR PLATFORM API
 // ============================================================================
 
 #[cfg(target_arch = "wasm32")]
-mod js_firestore {
+mod js_platform {
     extern "C" {
+        // --- Score & Leaderboard ---
         pub fn js_submit_score(name_ptr: *const u8, name_len: i32, score: u32);
+        pub fn js_submit_score_full(
+            name_ptr: *const u8, name_len: i32,
+            score: u32,
+            diff_level: u32,
+            combo_max: u32,
+            fart_count: u32,
+            duration_ms: u32,
+            death_type_ptr: *const u8, death_type_len: i32,
+            zone_ptr: *const u8, zone_len: i32,
+        );
         pub fn js_fetch_leaderboard();
         pub fn js_is_leaderboard_ready() -> i32;
         pub fn js_get_leaderboard_count() -> i32;
@@ -77,11 +89,45 @@ mod js_firestore {
         pub fn js_reset_leaderboard();
         pub fn js_save_high_score(score: u32);
         pub fn js_get_high_score() -> u32;
+        // --- Platform Config ---
+        pub fn js_fetch_platform_config();
+        pub fn js_is_platform_config_ready() -> i32;
+        pub fn js_get_platform_config_json_length() -> i32;
+        pub fn js_get_platform_config_json(ptr: *mut u8, max_len: i32) -> i32;
+        // --- Auth ---
+        pub fn js_is_authenticated() -> i32;
+        pub fn js_is_auth_validated() -> i32;
+        pub fn js_get_auth_username_length() -> i32;
+        pub fn js_get_auth_username(ptr: *mut u8, max_len: i32) -> i32;
+        pub fn js_is_platform_configured() -> i32;
+        // --- Login (placeholder) ---
+        pub fn js_platform_login(
+            user_ptr: *const u8, user_len: i32,
+            pass_ptr: *const u8, pass_len: i32,
+        );
+        pub fn js_is_login_complete() -> i32;
+        pub fn js_is_login_success() -> i32;
     }
     
     pub fn submit_score(name: &str, score: u32) {
         unsafe {
             js_submit_score(name.as_ptr(), name.len() as i32, score);
+        }
+    }
+    
+    pub fn submit_score_full(
+        name: &str, score: u32,
+        diff_level: u32, combo_max: u32, fart_count: u32,
+        duration_secs: f32, death_type: &str, zone: &str,
+    ) {
+        unsafe {
+            let duration_ms = (duration_secs * 1000.0) as u32;
+            js_submit_score_full(
+                name.as_ptr(), name.len() as i32,
+                score, diff_level, combo_max, fart_count, duration_ms,
+                death_type.as_ptr(), death_type.len() as i32,
+                zone.as_ptr(), zone.len() as i32,
+            );
         }
     }
     
@@ -119,11 +165,78 @@ mod js_firestore {
     pub fn get_high_score() -> u32 {
         unsafe { js_get_high_score() }
     }
+    
+    // --- Platform Config ---
+    pub fn fetch_platform_config() {
+        unsafe { js_fetch_platform_config(); }
+    }
+    
+    pub fn is_platform_config_ready() -> bool {
+        unsafe { js_is_platform_config_ready() != 0 }
+    }
+    
+    pub fn get_platform_config_json() -> Option<String> {
+        unsafe {
+            let len = js_get_platform_config_json_length();
+            if len <= 0 { return None; }
+            let mut buf = vec![0u8; len as usize];
+            let actual = js_get_platform_config_json(buf.as_mut_ptr(), len);
+            buf.truncate(actual as usize);
+            String::from_utf8(buf).ok()
+        }
+    }
+    
+    // --- Auth ---
+    pub fn is_authenticated() -> bool {
+        unsafe { js_is_authenticated() != 0 }
+    }
+    
+    pub fn is_auth_validated() -> bool {
+        unsafe { js_is_auth_validated() != 0 }
+    }
+    
+    pub fn get_auth_username() -> String {
+        unsafe {
+            let len = js_get_auth_username_length();
+            if len <= 0 { return "Anonyme".to_string(); }
+            let mut buf = vec![0u8; len as usize];
+            let actual = js_get_auth_username(buf.as_mut_ptr(), len);
+            buf.truncate(actual as usize);
+            String::from_utf8(buf).unwrap_or_else(|_| "Anonyme".to_string())
+        }
+    }
+    
+    pub fn is_platform_configured() -> bool {
+        unsafe { js_is_platform_configured() != 0 }
+    }
+    
+    // --- Login ---
+    pub fn platform_login(username: &str, password: &str) {
+        unsafe {
+            js_platform_login(
+                username.as_ptr(), username.len() as i32,
+                password.as_ptr(), password.len() as i32,
+            );
+        }
+    }
+    
+    pub fn is_login_complete() -> bool {
+        unsafe { js_is_login_complete() != 0 }
+    }
+    
+    pub fn is_login_success() -> bool {
+        unsafe { js_is_login_success() != 0 }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-mod js_firestore {
+mod js_platform {
     pub fn submit_score(_name: &str, _score: u32) {}
+    pub fn submit_score_full(
+        _name: &str, _score: u32,
+        _diff_level: u32, _combo_max: u32, _fart_count: u32,
+        _duration_secs: f32, _death_type: &str, _zone: &str,
+    ) {}
     pub fn fetch_leaderboard() {}
     pub fn is_leaderboard_ready() -> bool { true }
     pub fn get_leaderboard_count() -> usize { 0 }
@@ -131,13 +244,23 @@ mod js_firestore {
     pub fn reset_leaderboard() {}
     pub fn save_high_score(_score: u32) {}
     pub fn get_high_score() -> u32 { 0 }
+    pub fn fetch_platform_config() {}
+    pub fn is_platform_config_ready() -> bool { true }
+    pub fn get_platform_config_json() -> Option<String> { None }
+    pub fn is_authenticated() -> bool { false }
+    pub fn is_auth_validated() -> bool { true }
+    pub fn get_auth_username() -> String { "Anonyme".to_string() }
+    pub fn is_platform_configured() -> bool { false }
+    pub fn platform_login(_username: &str, _password: &str) {}
+    pub fn is_login_complete() -> bool { false }
+    pub fn is_login_success() -> bool { false }
 }
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 struct GameConfig {
     gravity_base: f32,
     fart_power_base: f32,
@@ -1140,14 +1263,14 @@ fn is_leaderboard_loading() -> bool {
     unsafe { LEADERBOARD_FETCHING }
 }
 
-/// Start fetching leaderboard from Firestore (async)
+/// Start fetching leaderboard from platform API (async)
 fn start_leaderboard_fetch() {
     #[cfg(target_arch = "wasm32")]
     {
         unsafe {
             if !LEADERBOARD_FETCHING {
                 LEADERBOARD_FETCHING = true;
-                js_firestore::fetch_leaderboard();
+                js_platform::fetch_leaderboard();
             }
         }
     }
@@ -1157,17 +1280,17 @@ fn start_leaderboard_fetch() {
 fn poll_leaderboard() -> Option<Vec<LeaderboardEntry>> {
     #[cfg(target_arch = "wasm32")]
     {
-        if js_firestore::is_leaderboard_ready() {
+        if js_platform::is_leaderboard_ready() {
             unsafe {
                 LEADERBOARD_FETCHING = false;
             }
-            let count = js_firestore::get_leaderboard_count();
+            let count = js_platform::get_leaderboard_count();
             let mut entries = Vec::with_capacity(count);
             for i in 0..count {
-                let (name, score) = js_firestore::get_leaderboard_entry(i);
+                let (name, score) = js_platform::get_leaderboard_entry(i);
                 entries.push(LeaderboardEntry { name, score });
             }
-            js_firestore::reset_leaderboard();
+            js_platform::reset_leaderboard();
             return Some(entries);
         }
         None
@@ -1198,11 +1321,11 @@ fn update_leaderboard_cache(entries: Vec<LeaderboardEntry>) {
     }
 }
 
-/// Submit score to Firestore
+/// Submit score to platform API
 fn submit_score(name: &str, score: u32) {
     #[cfg(target_arch = "wasm32")]
     {
-        js_firestore::submit_score(name, score);
+        js_platform::submit_score(name, score);
     }
     
     #[cfg(not(target_arch = "wasm32"))]
@@ -1212,11 +1335,11 @@ fn submit_score(name: &str, score: u32) {
     }
 }
 
-/// Get persisted high score from localStorage
+/// Get persisted high score from sessionStorage or platform
 fn get_stored_high_score() -> u32 {
     #[cfg(target_arch = "wasm32")]
     {
-        js_firestore::get_high_score()
+        js_platform::get_high_score()
     }
     
     #[cfg(not(target_arch = "wasm32"))]
@@ -1225,16 +1348,81 @@ fn get_stored_high_score() -> u32 {
     }
 }
 
-/// Save high score to localStorage
+/// Save high score to sessionStorage
 fn save_high_score(score: u32) {
     #[cfg(target_arch = "wasm32")]
     {
-        js_firestore::save_high_score(score);
+        js_platform::save_high_score(score);
     }
     
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = score;
+    }
+}
+
+/// Submit detailed score to platform API (with game stats)
+fn submit_score_full(
+    name: &str, score: u32,
+    diff_level: u32, combo_max: u32, fart_count: u32,
+    duration_secs: f32, death_type: &str, zone: &str,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_platform::submit_score_full(
+            name, score, diff_level, combo_max, fart_count,
+            duration_secs, death_type, zone,
+        );
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        eprintln!("[Platform] Score submitted: {} - {} (lvl:{}, combo:{}, farts:{}, {:.1}s, {}, {})",
+            name, score, diff_level, combo_max, fart_count, duration_secs, death_type, zone);
+        let _ = (name, score, diff_level, combo_max, fart_count, duration_secs, death_type, zone);
+    }
+}
+
+/// Check if platform is configured and user is authenticated
+fn is_platform_connected() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_platform::is_platform_configured() && js_platform::is_authenticated()
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+/// Get the platform username (or "Anonyme")
+fn get_platform_username() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_platform::get_auth_username()
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        "Anonyme".to_string()
+    }
+}
+
+/// Get platform config override JSON (partial)
+fn get_platform_config_override() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if js_platform::is_platform_config_ready() {
+            js_platform::get_platform_config_json()
+        } else {
+            None
+        }
+    }
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        None
     }
 }
 
@@ -1324,6 +1512,10 @@ struct Game {
     selected_button: usize,
     // Click visual feedback
     click_effects: Vec<ClickEffect>,
+    // Platform connection
+    is_connected: bool,
+    // Track max combo for score submission
+    combo_max: u32,
 }
 
 impl Game {
@@ -1331,6 +1523,13 @@ impl Game {
         let world_height = config.world_height;
         let initial_min_clouds = calculate_min_clouds(1, &config);
         let stored_high = get_stored_high_score();
+        let connected = is_platform_connected();
+        // If connected, use platform username
+        let platform_name = if connected {
+            get_platform_username()
+        } else {
+            String::new()
+        };
         Self {
             player: Player::new(world_height),
             obstacles: Vec::new(),
@@ -1338,7 +1537,7 @@ impl Game {
             floating_texts: Vec::new(),
             score: 0.0,
             high_score: stored_high,
-            player_name: String::new(),
+            player_name: platform_name,
             name_input: String::new(),
             shake_offset: Vec2::ZERO,
             spawn_timer: 0.0,
@@ -1370,6 +1569,9 @@ impl Game {
             selected_button: 0,
             // Click effects
             click_effects: Vec::new(),
+            // Platform
+            is_connected: connected,
+            combo_max: 0,
             config,
         }
     }
@@ -1399,6 +1601,9 @@ impl Game {
         self.death_animation_scale = 1.0;
         self.difficulty_level = 1;
         self.play_time = 0.0;
+        // Platform
+        self.combo_max = 0;
+        self.is_connected = is_platform_connected();
     }
 
     fn fart(&mut self, direction_up: bool) {
@@ -1429,6 +1634,10 @@ impl Game {
             self.combo_count = combo_level;
             self.combo_multiplier = calculate_combo_multiplier(combo_level);
             self.combo_display_timer = 2.0;
+            // Track max combo for score submission
+            if combo_level as u32 > self.combo_max {
+                self.combo_max = combo_level as u32;
+            }
             
             // Play combo up sound if new level
             if combo_level > old_combo {
@@ -1619,18 +1828,24 @@ impl Game {
                 let custom_activated = btn_custom.is_activated() || (self.selected_button == 2 && (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space)));
                 
                 if play_activated {
-                    if self.player_name.is_empty() {
+                    if self.player_name.is_empty() && !self.is_connected {
                         self.state = GameState::EnterName;
                         // Trigger mobile keyboard on WASM
                         #[cfg(target_arch = "wasm32")]
                         js_keyboard::show_keyboard();
                     } else {
+                        // If connected but no name yet, use platform username
+                        if self.player_name.is_empty() && self.is_connected {
+                            self.player_name = get_platform_username();
+                        }
                         self.reset();
                         self.state = GameState::Playing;
                     }
                 } else if leaderboard_activated {
-                    // Start fetching if not already
-                    start_leaderboard_fetch();
+                    // Start fetching if not already (only if connected)
+                    if self.is_connected {
+                        start_leaderboard_fetch();
+                    }
                     self.state = GameState::Leaderboard;
                 } else if custom_activated {
                     self.state = GameState::CustomGame;
@@ -1912,9 +2127,31 @@ impl Game {
                         self.high_score = total_score;
                         save_high_score(total_score);
                     }
-                    submit_score(&self.player_name, total_score);
+                    // Submit score — full details if connected, basic otherwise
+                    if self.is_connected {
+                        let death_str = match self.death_type {
+                            DeathType::Splat => "splat",
+                            DeathType::Explode => "explode",
+                            DeathType::Cloud => "cloud",
+                            DeathType::None => "none",
+                        };
+                        let zone_str = match self.current_zone {
+                            AltitudeZone::Space => "space",
+                            AltitudeZone::HighSky => "high_sky",
+                            AltitudeZone::Sky => "sky",
+                            AltitudeZone::Ground => "ground",
+                        };
+                        submit_score_full(
+                            &self.player_name, total_score,
+                            self.difficulty_level, self.combo_max,
+                            self.fart_count, self.play_time,
+                            death_str, zone_str,
+                        );
+                    }
                     // Start async leaderboard fetch
-                    start_leaderboard_fetch();
+                    if self.is_connected {
+                        start_leaderboard_fetch();
+                    }
                     self.pending_sounds.push(SoundAction::GameOver);
                     self.state = GameState::GameOver;
                 } else {
@@ -2800,11 +3037,28 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let config: GameConfig = load_string("assets/config.json")
+    let mut config: GameConfig = load_string("assets/config.json")
         .await
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+
+    // Apply platform config override (partial merge)
+    if let Some(override_json) = get_platform_config_override() {
+        // Parse the override as a serde_json::Value and merge fields
+        if let Ok(override_val) = serde_json::from_str::<serde_json::Value>(&override_json) {
+            if let Ok(mut config_val) = serde_json::to_value(&config) {
+                if let (Some(base), Some(overrides)) = (config_val.as_object_mut(), override_val.as_object()) {
+                    for (key, val) in overrides {
+                        base.insert(key.clone(), val.clone());
+                    }
+                    if let Ok(merged) = serde_json::from_value(config_val) {
+                        config = merged;
+                    }
+                }
+            }
+        }
+    }
 
     // Load sprites
     let mut sprites = SpriteRegistry::new();

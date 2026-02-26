@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FartCloud - Pete pour voler!</title>
+
+    <!-- Platform API URL — leave empty for anonymous mode -->
+    <meta name="platform-api-url" content="">
+
+    <style>
+        * { margin: 0; padding: 0; }
+        html, body { 
+            width: 100%; height: 100%; 
+            overflow: hidden; 
+            background: #000;
+            touch-action: none;
+        }
+        canvas { 
+            display: block; 
+            width: 100vw; height: 100vh; 
+            position: absolute; top: 0; left: 0;
+        }
+        /* Mobile keyboard overlay */
+        #mobile-input-overlay {
+            display: none;
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            justify-content: center; align-items: center;
+            flex-direction: column; gap: 16px;
+        }
+        #mobile-input-overlay.visible { display: flex; }
+        #mobile-input-overlay label {
+            color: #fff; font-size: 20px; font-family: sans-serif;
+        }
+        #mobile-input-overlay input {
+            font-size: 24px; padding: 12px 20px;
+            border: 2px solid #4CAF50; border-radius: 8px;
+            background: #222; color: #fff;
+            text-align: center; width: 260px;
+            max-width: 80vw;
+        }
+        #mobile-input-overlay button {
+            font-size: 20px; padding: 12px 40px;
+            background: #4CAF50; color: #fff;
+            border: none; border-radius: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas" tabindex="1"></canvas>
+
+    <!-- Mobile keyboard overlay -->
+    <div id="mobile-input-overlay">
+        <label>Ton pseudo (max 12 car.)</label>
+        <input id="mobile-input-field" type="text" maxlength="12" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="CloudMaster">
+        <button id="mobile-input-confirm">OK</button>
+    </div>
+
+    <script>
+    // ========================================================================
+    // CONFIGURATION
+    // ========================================================================
+
+    const PLATFORM_API_URL = (() => {
+        const meta = document.querySelector('meta[name="platform-api-url"]');
+        const url = meta ? meta.content.trim() : '';
+        // Remove trailing slash
+        return url.endsWith('/') ? url.slice(0, -1) : url;
+    })();
+
+    const isPlatformConfigured = PLATFORM_API_URL.length > 0;
+
+    // ========================================================================
+    // AUTH STATE
+    // ========================================================================
+
+    let authToken = null;
+    let authUsername = 'Anonyme';
+    let authUserId = null;
+    let isAuthenticated = false;
+
+    // Read token from URL query params
+    (function initAuth() {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        if (token) {
+            authToken = token;
+            // Clean URL (remove token from visible URL)
+            const cleanUrl = window.location.pathname + window.location.hash;
+            window.history.replaceState({}, '', cleanUrl);
+        }
+    })();
+
+    // ========================================================================
+    // PLATFORM API HELPERS
+    // ========================================================================
+
+    function apiHeaders() {
+        const h = { 'Content-Type': 'application/json' };
+        if (authToken) h['Authorization'] = 'Bearer ' + authToken;
+        return h;
+    }
+
+    async function apiFetch(path, options = {}) {
+        if (!isPlatformConfigured) return null;
+        try {
+            const resp = await fetch(PLATFORM_API_URL + path, {
+                ...options,
+                headers: { ...apiHeaders(), ...(options.headers || {}) }
+            });
+            if (!resp.ok) {
+                console.warn('[Platform API]', resp.status, path);
+                return null;
+            }
+            return await resp.json();
+        } catch (e) {
+            console.warn('[Platform API] fetch error:', path, e);
+            return null;
+        }
+    }
+
+    // ========================================================================
+    // AUTH VALIDATION
+    // ========================================================================
+
+    let authValidated = false;
+    let authValidating = false;
+
+    async function validateToken() {
+        if (!isPlatformConfigured || !authToken) {
+            authValidated = true;
+            return;
+        }
+        authValidating = true;
+        const data = await apiFetch('/api/game/auth/validate');
+        if (data && data.valid) {
+            isAuthenticated = true;
+            authUsername = data.username || 'Joueur';
+            authUserId = data.user_id || null;
+        } else {
+            // Token invalid — fall back to anonymous
+            authToken = null;
+            isAuthenticated = false;
+            authUsername = 'Anonyme';
+        }
+        authValidating = false;
+        authValidated = true;
+    }
+
+    // Start validation immediately
+    validateToken();
+
+    // ========================================================================
+    // LOGIN (placeholder)
+    // ========================================================================
+
+    let loginResult = null;
+    let loginPending = false;
+
+    async function platformLogin(username, password) {
+        if (!isPlatformConfigured) {
+            loginResult = { error: 'Platform not configured' };
+            return;
+        }
+        loginPending = true;
+        const data = await apiFetch('/api/game/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        });
+        if (data && data.token) {
+            authToken = data.token;
+            authUsername = data.username || username;
+            authUserId = data.user_id || null;
+            isAuthenticated = true;
+            loginResult = { success: true };
+        } else {
+            loginResult = { error: 'Login failed' };
+        }
+        loginPending = false;
+    }
+
+    // ========================================================================
+    // PLATFORM CONFIG
+    // ========================================================================
+
+    let platformConfig = null;
+    let platformConfigReady = false;
+    let platformConfigFetching = false;
+
+    async function fetchPlatformConfig() {
+        if (!isPlatformConfigured) {
+            platformConfigReady = true;
+            return;
+        }
+        platformConfigFetching = true;
+        const data = await apiFetch('/api/game/config');
+        if (data) {
+            platformConfig = data;
+        }
+        platformConfigFetching = false;
+        platformConfigReady = true;
+    }
+
+    // Start config fetch immediately
+    fetchPlatformConfig();
+
+    // ========================================================================
+    // LEADERBOARD
+    // ========================================================================
+
+    let leaderboardData = null;
+    let leaderboardReady = false;
+    let leaderboardFetching = false;
+
+    async function fetchLeaderboard() {
+        if (!isPlatformConfigured || !isAuthenticated) {
+            leaderboardReady = true;
+            leaderboardData = { entries: [], total: 0, player_rank: null, player_best: null };
+            return;
+        }
+        leaderboardFetching = true;
+        leaderboardReady = false;
+        const data = await apiFetch('/api/game/leaderboard?limit=20');
+        if (data && data.entries) {
+            leaderboardData = data;
+        } else {
+            leaderboardData = { entries: [], total: 0, player_rank: null, player_best: null };
+        }
+        leaderboardFetching = false;
+        leaderboardReady = true;
+    }
+
+    // ========================================================================
+    // SCORE SUBMISSION
+    // ========================================================================
+
+    async function submitScoreToPlatform(name, score, extras) {
+        if (!isPlatformConfigured || !isAuthenticated) return;
+        await apiFetch('/api/game/scores', {
+            method: 'POST',
+            body: JSON.stringify({
+                username: name,
+                score: score,
+                difficulty_level: extras.difficulty_level || 1,
+                combo_max: extras.combo_max || 0,
+                fart_count: extras.fart_count || 0,
+                duration_seconds: extras.duration_seconds || 0,
+                death_type: extras.death_type || 'cloud',
+                altitude_zone: extras.altitude_zone || 'sky'
+            })
+        });
+    }
+
+    // ========================================================================
+    // SESSION HIGH SCORE (sessionStorage fallback)
+    // ========================================================================
+
+    function getSessionHighScore() {
+        try {
+            return parseInt(sessionStorage.getItem('fartcloud_high_score') || '0', 10);
+        } catch { return 0; }
+    }
+
+    function saveSessionHighScore(score) {
+        try {
+            sessionStorage.setItem('fartcloud_high_score', String(score));
+        } catch {}
+    }
+
+    // ========================================================================
+    // WASM STRING HELPERS
+    // ========================================================================
+
+    // Will be set when WASM module loads
+    let wasmMemory = null;
+
+    function readWasmString(ptr, len) {
+        if (!wasmMemory) return '';
+        const bytes = new Uint8Array(wasmMemory.buffer, ptr, len);
+        return new TextDecoder().decode(bytes);
+    }
+
+    function writeWasmString(str, ptr, maxLen) {
+        if (!wasmMemory) return 0;
+        const encoded = new TextEncoder().encode(str);
+        const len = Math.min(encoded.length, maxLen);
+        const target = new Uint8Array(wasmMemory.buffer, ptr, len);
+        target.set(encoded.subarray(0, len));
+        return len;
+    }
+
+    // ========================================================================
+    // MOBILE KEYBOARD (js_keyboard module)
+    // ========================================================================
+
+    let mobileInputConfirmed = false;
+    let mobileInputValue = '';
+
+    const overlay = document.getElementById('mobile-input-overlay');
+    const inputField = document.getElementById('mobile-input-field');
+    const confirmBtn = document.getElementById('mobile-input-confirm');
+
+    confirmBtn.addEventListener('click', () => {
+        mobileInputValue = inputField.value.trim() || 'Anonymous';
+        mobileInputConfirmed = true;
+        overlay.classList.remove('visible');
+        inputField.blur();
+    });
+
+    inputField.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            confirmBtn.click();
+        }
+    });
+
+    // ========================================================================
+    // EXTERN "C" FUNCTIONS — exposed to WASM
+    // ========================================================================
+
+    // These functions are imported by the WASM module and called from Rust.
+    // They bridge the gap between Rust/WASM and the browser + platform API.
+
+    const wasmImports = {
+        env: {
+            // --- Mobile Keyboard ---
+            js_show_mobile_keyboard: () => {
+                inputField.value = '';
+                mobileInputConfirmed = false;
+                mobileInputValue = '';
+                overlay.classList.add('visible');
+                setTimeout(() => inputField.focus(), 100);
+            },
+            js_hide_mobile_keyboard: () => {
+                overlay.classList.remove('visible');
+                inputField.blur();
+            },
+            js_is_input_confirmed: () => mobileInputConfirmed ? 1 : 0,
+            js_get_input_length: () => new TextEncoder().encode(mobileInputValue).length,
+            js_get_input_value: (ptr, maxLen) => writeWasmString(mobileInputValue, ptr, maxLen),
+            js_reset_input: () => {
+                mobileInputConfirmed = false;
+                mobileInputValue = '';
+            },
+
+            // --- Platform: Score submission ---
+            js_submit_score: (namePtr, nameLen, score) => {
+                const name = readWasmString(namePtr, nameLen);
+                // extras will be submitted with more details via js_submit_score_full
+                submitScoreToPlatform(name, score, {});
+            },
+
+            // --- Platform: Score submission with details ---
+            js_submit_score_full: (namePtr, nameLen, score, diffLevel, comboMax, fartCount, durationMs, deathTypePtr, deathTypeLen, zonePtr, zoneLen) => {
+                const name = readWasmString(namePtr, nameLen);
+                const deathType = readWasmString(deathTypePtr, deathTypeLen);
+                const zone = readWasmString(zonePtr, zoneLen);
+                submitScoreToPlatform(name, score, {
+                    difficulty_level: diffLevel,
+                    combo_max: comboMax,
+                    fart_count: fartCount,
+                    duration_seconds: durationMs / 1000.0,
+                    death_type: deathType,
+                    altitude_zone: zone
+                });
+            },
+
+            // --- Platform: Leaderboard ---
+            js_fetch_leaderboard: () => {
+                leaderboardReady = false;
+                fetchLeaderboard();
+            },
+            js_is_leaderboard_ready: () => leaderboardReady ? 1 : 0,
+            js_get_leaderboard_count: () => {
+                if (!leaderboardData || !leaderboardData.entries) return 0;
+                return leaderboardData.entries.length;
+            },
+            js_get_leaderboard_name: (index, ptr, maxLen) => {
+                if (!leaderboardData || !leaderboardData.entries || index >= leaderboardData.entries.length) return 0;
+                return writeWasmString(leaderboardData.entries[index].username || '', ptr, maxLen);
+            },
+            js_get_leaderboard_score: (index) => {
+                if (!leaderboardData || !leaderboardData.entries || index >= leaderboardData.entries.length) return 0;
+                return leaderboardData.entries[index].score || 0;
+            },
+            js_reset_leaderboard: () => {
+                // No-op — leaderboard data stays cached
+            },
+
+            // --- Platform: High score (sessionStorage fallback) ---
+            js_save_high_score: (score) => {
+                saveSessionHighScore(score);
+            },
+            js_get_high_score: () => {
+                // If connected and leaderboard has player_best, use that
+                if (isAuthenticated && leaderboardData && leaderboardData.player_best != null) {
+                    return leaderboardData.player_best;
+                }
+                return getSessionHighScore();
+            },
+
+            // --- Platform: Config override ---
+            js_fetch_platform_config: () => {
+                platformConfigReady = false;
+                fetchPlatformConfig();
+            },
+            js_is_platform_config_ready: () => platformConfigReady ? 1 : 0,
+            js_get_platform_config_json: (ptr, maxLen) => {
+                if (!platformConfig) return 0;
+                const json = JSON.stringify(platformConfig);
+                return writeWasmString(json, ptr, maxLen);
+            },
+            js_get_platform_config_json_length: () => {
+                if (!platformConfig) return 0;
+                return new TextEncoder().encode(JSON.stringify(platformConfig)).length;
+            },
+
+            // --- Platform: Auth ---
+            js_is_authenticated: () => isAuthenticated ? 1 : 0,
+            js_is_auth_validated: () => authValidated ? 1 : 0,
+            js_get_auth_username: (ptr, maxLen) => writeWasmString(authUsername, ptr, maxLen),
+            js_get_auth_username_length: () => new TextEncoder().encode(authUsername).length,
+            js_get_auth_token: (ptr, maxLen) => writeWasmString(authToken || '', ptr, maxLen),
+            js_get_auth_token_length: () => authToken ? new TextEncoder().encode(authToken).length : 0,
+            js_is_platform_configured: () => isPlatformConfigured ? 1 : 0,
+
+            // --- Platform: Login ---
+            js_platform_login: (userPtr, userLen, passPtr, passLen) => {
+                const username = readWasmString(userPtr, userLen);
+                const password = readWasmString(passPtr, passLen);
+                loginResult = null;
+                platformLogin(username, password);
+            },
+            js_is_login_complete: () => (loginResult !== null) ? 1 : 0,
+            js_is_login_success: () => (loginResult && loginResult.success) ? 1 : 0,
+        }
+    };
+
+    // ========================================================================
+    // WASM LOADER (Macroquad)
+    // ========================================================================
+
+    // Macroquad provides its own WASM loader via gl.js
+    // We need to hook into it to inject our custom imports
+
+    // Load the macroquad JS runtime
+    const script = document.createElement('script');
+    script.src = 'mq_js_bundle.js';
+    script.onload = async () => {
+        // Macroquad's load() function accepts additional imports
+        // We pass our platform + keyboard imports
+        const wasm = await load('fartcloud.wasm', wasmImports);
+        if (wasm && wasm.memory) {
+            wasmMemory = wasm.memory;
+        }
+    };
+    document.head.appendChild(script);
+    </script>
+</body>
+</html>
